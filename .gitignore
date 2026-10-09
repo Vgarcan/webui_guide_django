@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+.vendor/
+.env
+*.sqlite3
+*.tar.gz
+staticfiles/

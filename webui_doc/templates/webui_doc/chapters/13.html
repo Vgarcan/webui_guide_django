@@ -1,0 +1,108 @@
+{% extends 'webui_doc/chapter_base.html' %}
+{% block chapter_content %}
+
+<section class="chapter-orientation"><p class="eyebrow">LEARNING OBJECTIVES</p><h2>Build on Open WebUI without exposing its trust boundary</h2><p>You will send a useful API request, protect user identity and credentials, proxy a browser through Django, stream output, attach Knowledge or Tools and design failure handling for a real application.</p></section>
+
+<section id="platform"><h2>01. Open WebUI is also an API platform</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-5.webp' alt='Browser and custom backend connecting through Open WebUI to models knowledge tools and providers' caption='Figure 1 · Recommended architecture: browser → your backend → Open WebUI → platform capabilities.' width='1672' height='941' %}<p>The web interface is one client of an HTTP backend. A Django application, Python script, internal bot or automation can use the same platform layer and let Open WebUI resolve Ollama, remote providers, Workspace Models, permissions, Knowledge and Tools.</p><pre><code>your application → Open WebUI API
+                 → model / RAG / tools / services</code></pre>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-3.webp' alt='Open WebUI admin connections screen for model providers' caption='Interface · Provider connections are administered behind the API surface.' width='2048' height='1365' %}<p>A UI serves people; an API serves software. The essential contract is authentication, model ID, messages, streaming and optional capabilities.</p></section>
+
+<section id="identity"><h2>02. API keys carry identity and permissions</h2><p>The administrator enables API keys globally; regular users also need the API Keys permission. A key represents its owner and remains subject to that account’s model, Knowledge and Tool access.</p><pre><code>Authorization: Bearer YOUR_API_KEY</code></pre><p>If a reverse proxy already uses <code>Authorization</code>, Open WebUI can accept <code>x-api-key</code> or a configured custom header. In every case, treat the value like a password: never commit it, paste it into shared documentation or ship it to a browser.</p><blockquote>The API is not an RBAC bypass. The key can do what its user is allowed to do.</blockquote></section>
+
+<section id="minimum"><h2>03. The minimum useful API</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-6.webp' alt='Open WebUI API surface for models chat files knowledge tools and streaming' caption='Figure 2 · Start with model discovery and one chat request, then add one capability at a time.' width='1672' height='941' %}<h3>List models</h3><pre><code>curl -H "Authorization: Bearer $OPEN_WEBUI_API_KEY" \
+  http://localhost:3000/api/models</code></pre><p><code>GET /api/models</code> returns models visible to the represented account. Use its IDs rather than a display-name guess.</p>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-2.webp' alt='Workspace Models screen in Open WebUI' caption='Interface · Workspace Models helps relate human-facing assistants to API model IDs.' width='2048' height='1365' %}<h3>Send a chat completion</h3><pre><code>curl -X POST http://localhost:3000/api/chat/completions \
+  -H "Authorization: Bearer $OPEN_WEBUI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "&lt;MODEL_ID&gt;",
+    "messages": [{"role":"user","content":"Explain dependency injection."}]
+  }'</code></pre><p>The endpoint follows the familiar OpenAI Chat Completions shape. Your application must send the conversation history the model should see; text displayed only in the browser is not implicit context.</p><p>Roles are part of that contract. A <code>system</code> message defines durable behaviour for the request, <code>user</code> carries the current instruction and earlier <code>assistant</code> messages preserve the conversational path. Trim history deliberately rather than sending an unlimited transcript. When the application owns state, it also owns the rule for what is retained, redacted or summarised.</p></section>
+
+<section id="python"><h2>04. First client in Python</h2><pre><code>import os
+import requests
+
+BASE_URL = os.getenv("OPEN_WEBUI_URL", "http://localhost:3000")
+API_KEY = os.environ["OPEN_WEBUI_API_KEY"]
+MODEL = os.environ["OPEN_WEBUI_MODEL"]
+
+def ask(prompt: str) -> str:
+    response = requests.post(
+        f"{BASE_URL}/api/chat/completions",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"model": MODEL,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=120,
+    )
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"]</code></pre><p>URL, key and model come from the environment; the request has a timeout; status is checked before JSON is trusted. Commit a <code>.env.example</code> containing variable names, never the live credential.</p></section>
+
+<section id="browser"><h2>05. Browser calls need a server-side boundary</h2><p>A direct <code>fetch()</code> can prove a local experiment, but any shared key embedded in JavaScript, a frontend environment variable, Base64 or a minified bundle is recoverable by the person running the browser.</p><pre><code>browser → /api/ask/ on your app
+        → Django → Open WebUI → model</code></pre><p>The backend authenticates your user, selects permitted models, keeps the upstream key private and adds quotas, rate limits, validation, logging, caching or moderation.</p><p>CORS is not a substitute for this design. It controls which browser origins may read a response; it does not make a shipped credential secret. A user can inspect their own browser and call any endpoint the key can reach.</p></section>
+
+<section id="django"><h2>06. Django as a controlled proxy</h2><h3>settings.py</h3><pre><code>OPEN_WEBUI_URL = os.getenv("OPEN_WEBUI_URL", "http://localhost:3000")
+OPEN_WEBUI_API_KEY = os.environ["OPEN_WEBUI_API_KEY"]
+OPEN_WEBUI_MODEL = os.environ["OPEN_WEBUI_MODEL"]</code></pre><h3>views.py</h3><pre><code>@require_POST
+def ask_ai(request):
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    prompt = str(body.get("prompt", "")).strip()
+    if not prompt:
+        return JsonResponse({"error": "prompt is required"}, status=400)
+
+    payload = {
+        "model": settings.OPEN_WEBUI_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    try:
+        upstream = requests.post(
+            f"{settings.OPEN_WEBUI_URL}/api/chat/completions",
+            headers={"Authorization":
+                     f"Bearer {settings.OPEN_WEBUI_API_KEY}"},
+            json=payload, timeout=120,
+        )
+        upstream.raise_for_status()
+    except requests.RequestException:
+        return JsonResponse({"error": "AI service unavailable"}, status=502)
+
+    answer = upstream.json()["choices"][0]["message"]["content"]
+    return JsonResponse({"answer": answer})</code></pre><p>The frontend now posts only the user prompt and its normal CSRF token to <code>/api/ask/</code>. Django decides which upstream model the signed-in user may use and never leaks raw internal failures or secrets.</p></section>
+
+<section id="streaming"><h2>07. Streaming with Server-Sent Events</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-9.webp' alt='Server-sent events carrying response deltas from model through server to browser' caption='Figure 3 · SSE lets the interface render output before the complete answer exists.' width='1672' height='941' %}<p>Add <code>"stream": true</code>. The response becomes a sequence of <code>data:</code> events ending in <code>[DONE]</code>; concatenate the content deltas as they arrive.</p><pre><code>for raw_line in response.iter_lines(decode_unicode=True):
+    if not raw_line or not raw_line.startswith("data: "):
+        continue
+    payload = raw_line[6:]
+    if payload == "[DONE]":
+        break
+    chunk = json.loads(payload)
+    delta = chunk["choices"][0].get("delta", {}).get("content", "")
+    yield delta</code></pre><p>A production bridge also handles disconnects, cancellation, timeouts, heartbeat or non-content events and tool-call deltas. Streaming improves perceived latency; it does not remove backend latency.</p></section>
+
+<section id="knowledge"><h2>08. Add files and Knowledge</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-7.webp' alt='Chat request enriched by files knowledge and tool IDs' caption='Figure 4 · The same endpoint becomes specialised by attaching platform-managed resources.' width='1672' height='941' %}<pre><code>{
+  "model": "&lt;MODEL_ID&gt;",
+  "messages": [{"role":"user","content":"Summarise the decisions."}],
+  "files": [{"type":"collection","id":"&lt;COLLECTION_ID&gt;"}]
+}</code></pre><p>Use <code>type: file</code> with a file ID for one uploaded document, or <code>type: collection</code> for a Knowledge collection. Open WebUI applies the configured RAG pipeline so your custom app does not need to own a second vector stack.</p>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-4.webp' alt='Open WebUI Knowledge Base detail with source files' caption='Interface · Collection IDs refer to managed Knowledge resources and their documents.' width='2048' height='1365' %}</section>
+
+<section id="tools"><h2>09. Tools, MCP and server-side execution</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/13-image-1.webp' alt='Workspace Tools administration screen in Open WebUI' caption='Interface · Workspace Tools can be resolved by ID only when the API user is authorised.' width='2048' height='1365' %}<pre><code>{
+  "model": "&lt;MODEL_ID&gt;",
+  "messages": [{"role":"user","content":"Check the ticket status."}],
+  "tool_ids": ["server:mcp:&lt;MCP_SERVER_ID&gt;"]
+}</code></pre><p><code>tool_ids</code> asks Open WebUI to resolve its configured Workspace Tools, OpenAPI servers or MCP servers. A client-supplied OpenAI-style <code>tools</code> array is different: the client owns those definitions and normally executes returned tool calls itself. Begin with one working completion and one tool before adopting multi-round chat IDs, session IDs and built-in feature flows.</p><p>OAuth-backed MCP adds a user-specific dependency: the account represented by the API key must have completed authorisation. A globally healthy server can still return a user-scoped authentication failure. Log the connector, operation and account boundary without logging the token.</p></section>
+
+<section id="state"><h2>10. Decide where conversation state lives</h2><div class="table-scroll"><table><thead><tr><th>Pattern</th><th>Source of truth</th><th>Best fit</th></tr></thead><tbody><tr><td>Stateless-style completion</td><td>Your application stores history and sends relevant messages.</td><td>An independent product interface.</td></tr><tr><td>Backend-controlled Open WebUI chat</td><td>Open WebUI chat/message IDs and documented history structure.</td><td>Conversations that must appear in Open WebUI with its background tasks and rendering.</td></tr></tbody></table></div><p>Do not duplicate the same conversation in two databases without deciding which record is authoritative.</p><p>Because the endpoint is compatible with common OpenAI clients, many SDKs work by setting the base URL to <code>http://localhost:3000/api</code> and supplying the Open WebUI key. The SDK appends <code>/chat/completions</code>, so test the final URL rather than adding that path twice. The platform also exposes Anthropic-compatible and Ollama proxy surfaces for clients built around other protocols.</p><p>Protocol compatibility does not guarantee every provider-specific extension. Establish a conformance test for the fields your product depends on: text, streaming, usage, Tool calls and error structure.</p></section>
+
+<section id="failures"><h2>11. Errors, retries and correlation</h2><div class="table-scroll"><table><thead><tr><th>Signal</th><th>Interpretation</th></tr></thead><tbody><tr><td>400 / 422</td><td>Invalid JSON, field or parameter.</td></tr><tr><td>401</td><td>Missing or incorrect credential.</td></tr><tr><td>403</td><td>Authenticated, but not authorised for the resource.</td></tr><tr><td>404</td><td>Wrong endpoint or resource ID.</td></tr><tr><td>429</td><td>Capacity or rate limit; consider bounded backoff.</td></tr><tr><td>5xx</td><td>Server or upstream failure.</td></tr><tr><td>Timeout</td><td>The caller stopped waiting; downstream work may still be active.</td></tr></tbody></table></div><p>Retry reads and idempotent operations cautiously. A timeout around ticket creation or email delivery can hide a successful first attempt. Generate a request ID in Django and propagate it so browser, application, Open WebUI and service logs can be correlated.</p><p>Expose a stable product error to the browser and retain the detailed upstream status in protected logs. A user needs to know whether retry is sensible; they do not need a stack trace, internal hostname or fragment of a bearer token.</p></section>
+
+<section id="security"><h2>12. Defence in depth</h2><pre><code>ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS=true
+API_KEYS_ALLOWED_ENDPOINTS=/api/models,/api/chat/completions</code></pre><ul class="check-list"><li>Use a dedicated Open WebUI service account where practical.</li><li>Grant only required models, Knowledge and Tools.</li><li>Restrict API-key endpoints.</li><li>Keep the key in backend secret configuration.</li><li>Authenticate and authorise users in Django.</li><li>Limit rate and request size.</li><li>Validate model-generated tool arguments server-side.</li></ul></section>
+
+<section id="architecture"><h2>13. A real application request flow</h2><ol><li>The user signs in to your portal.</li><li>The browser posts to Django.</li><li>Django verifies permission and chooses a Workspace Model.</li><li>Django calls Open WebUI with its protected service key.</li><li>Open WebUI resolves model, prompt, RAG and authorised Tools.</li><li>The provider performs inference.</li><li>Django normalises or streams the result.</li><li>Your product stores only the business data it owns.</li></ol><aside class="callout"><strong>Architecture rule</strong><p>The browser owns interaction. Django owns product identity and policy. Open WebUI owns AI orchestration. The provider owns inference.</p></aside></section>
+
+<section id="checkpoint"><h2>14. Practical checkpoint</h2><ol><li>List models with a non-admin key.</li><li>Send one completion from Python with a timeout.</li><li>Build a protected Django endpoint and confirm the key never reaches the browser.</li><li>Add streaming or one Knowledge collection, not both at once.</li><li>Exercise 401, 403, timeout and upstream failure paths.</li></ol></section>
+
+<section id="glossary"><h2>15. Essential vocabulary</h2><dl class="concept-list"><div><dt>Bearer token</dt><dd>A credential sent in an HTTP authentication header.</dd></div><div><dt>OpenAI-compatible</dt><dd>An API implementing a familiar OpenAI request and response contract.</dd></div><div><dt>SSE</dt><dd>Server-Sent Events, a one-way HTTP event stream.</dd></div><div><dt>Backend proxy</dt><dd>A server that protects credentials and enforces policy before calling an upstream service.</dd></div><div><dt>CORS</dt><dd>The browser policy governing cross-origin requests.</dd></div><div><dt>Collection ID</dt><dd>The identifier used to attach managed Knowledge to a request.</dd></div></dl></section>
+
+{% endblock %}
+{% block official_sources %}<a href="https://docs.openwebui.com/reference/api-endpoints/" target="_blank" rel="noopener">API endpoints ↗</a><a href="https://docs.openwebui.com/features/authentication-access/api-keys/" target="_blank" rel="noopener">API keys ↗</a><a href="https://docs.openwebui.com/reference/server-side-tool-calling/" target="_blank" rel="noopener">Server-side tools ↗</a><a href="https://docs.openwebui.com/reference/api-flow/" target="_blank" rel="noopener">API flow ↗</a><a href="https://docs.openwebui.com/ecosystem/computer/reference/gateway-api/" target="_blank" rel="noopener">Gateway API ↗</a>{% endblock %}

@@ -1,0 +1,90 @@
+{% extends 'webui_doc/chapter_base.html' %}
+{% block chapter_content %}
+
+<section class="chapter-orientation"><p class="eyebrow">LEARNING OBJECTIVES</p><h2>Install a system you can explain and recover</h2><p>After this chapter you should understand every important Docker flag, where the data lives, how Open WebUI reaches Ollama, what can safely be replaced, how to update and what must be protected before remote exposure.</p><aside class="callout"><strong>Version context</strong><p>This chapter follows the Docker guidance reviewed in September 2026. Pin a release tag when reproducibility matters; update a moving tag deliberately.</p></aside></section>
+
+<section id="docker"><h2>01. Why Docker is the default path</h2><p>Open WebUI can run through Docker, Python, Kubernetes, Podman and other methods. Docker is this guide's default because it packages the application and dependencies into a reproducible, replaceable unit. Docker Compose becomes the maintainable baseline because it records that unit as reviewable configuration.</p><blockquote>Docker does not merely install files. It runs Open WebUI inside a replaceable container. Important state must outlive that container.</blockquote><p>Python or uv remains useful for development; Kubernetes makes sense when orchestration and scale justify it; Podman is strong in RHEL and Fedora environments. Learn one path deeply before multiplying choices.</p></section>
+
+<section id="persistence"><h2>02. Containers are temporary; data must persist</h2><p>A container can stop, disappear and be recreated without becoming a disaster. The application image is replaceable; your users, chats, settings and uploads are not.</p>{% include 'webui_doc/partials/figure.html' with image='imgs/02-image-2.webp' alt='Open WebUI container, persistent data volume and separate Ollama service' caption='Application, persistent state and model runtime have different lifecycles.' width='1536' height='1024' %}<p>Open WebUI stores application data at <code>/app/backend/data</code>. A named volume mounted there can include the database, uploads, vector data, caches and audit information. The exact files may evolve, but the directory must be treated as protected application state.</p><aside class="callout warning"><strong>Removing a container is not removing its volume</strong><p><code>docker compose down -v</code> and <code>docker volume rm</code> can delete data. Recreating a container while preserving the volume is an ordinary deployment operation.</p></aside><p>Ollama's model files and configuration are separate when it runs as its own service. Updating Open WebUI should not destroy Ollama's storage.</p></section>
+
+<section id="canonical"><h2>03. The canonical Docker setup</h2><p>The official pattern publishes the application port, maps persistent storage, creates a stable host route, keeps a fixed secret and assigns a restart policy.</p><pre><code># Generate once and keep it safe
+openssl rand -hex 32
+
+docker run -d \
+  -p 3000:8080 \
+  --add-host=host.docker.internal:host-gateway \
+  -v open-webui:/app/backend/data \
+  -e WEBUI_SECRET_KEY="replace-with-your-secret" \
+  --name open-webui \
+  --restart always \
+  ghcr.io/open-webui/open-webui:main</code></pre><div class="table-scroll"><table><thead><tr><th>Flag</th><th>Meaning</th></tr></thead><tbody><tr><td><code>-d</code></td><td>Run in the background.</td></tr><tr><td><code>-p 3000:8080</code></td><td>Publish container port 8080 on host port 3000.</td></tr><tr><td><code>--add-host</code></td><td>Let the Linux container resolve the host gateway.</td></tr><tr><td><code>-v</code></td><td>Mount durable storage at the application data path.</td></tr><tr><td><code>WEBUI_SECRET_KEY</code></td><td>Keep cryptographic identity stable across recreations.</td></tr><tr><td><code>--restart</code></td><td>Bring the service back after host restarts.</td></tr></tbody></table></div><p>If the secret changes during recreation, existing sessions can be invalidated.</p></section>
+
+<section id="compose"><h2>04. Docker Compose: the maintainable baseline</h2><p><code>docker run</code> teaches the moving parts. Compose records them in a file another person can review and repeat. Keep variable or sensitive values in a local <code>.env</code> file.</p><pre><code>open-webui/
+├── docker-compose.yml
+├── .env
+└── backups/</code></pre><h3>.env</h3><pre><code>OPEN_WEBUI_PORT=3000
+OPEN_WEBUI_TAG=main
+WEBUI_SECRET_KEY=replace-with-the-generated-value</code></pre><h3>docker-compose.yml</h3><pre><code>services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_TAG}
+    container_name: open-webui
+    ports:
+      - "${OPEN_WEBUI_PORT}:8080"
+    volumes:
+      - open-webui:/app/backend/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      WEBUI_SECRET_KEY: "${WEBUI_SECRET_KEY}"
+    restart: unless-stopped
+
+volumes:
+  open-webui:</code></pre><pre><code>docker compose up -d
+docker compose ps
+docker compose logs -f open-webui</code></pre><p>Learn to read service status, logs and volume inspection. A server you can only start is fragile; a server you can observe is maintainable.</p></section>
+
+<section id="ollama"><h2>05. Connecting Open WebUI to Ollama</h2><p>Ollama commonly exposes its API on port <code>11434</code>. Open WebUI calls that API; it does not contain the model.</p><h3>Ollama on the same host</h3><p>Inside the container, <code>localhost</code> refers to the container itself. With the host-gateway mapping, Open WebUI can reach host Ollama at <code>http://host.docker.internal:11434</code>.</p><pre><code>Browser → host:3000 → Open WebUI container
+→ host.docker.internal:11434 → Ollama</code></pre><h3>Ollama on another machine</h3><p>Use the real LAN address or DNS name, ensure Ollama listens on an accessible interface and permit traffic in the firewall only from the required source.</p><p>An administrator manages the connection in <strong>Settings → Admin → Connections</strong>. A sound design lets Ollama move to another host by changing this URL, without reinstalling the interface.</p></section>
+
+<section id="networking"><h2>06. Ports, hostnames and Docker networking</h2><p>Interpret an address from the viewpoint of the process making the request.</p><dl class="concept-list"><div><dt>Browser</dt><dd>Uses the server address and published host port, such as <code>http://server:3000</code>.</dd></div><div><dt>Container</dt><dd>Its own <code>localhost</code> points back to itself.</dd></div><div><dt>Host gateway</dt><dd><code>host.docker.internal</code> reaches a host service when explicitly configured.</dd></div><div><dt>Remote Ollama</dt><dd>Uses the remote machine's IP or DNS and port 11434.</dd></div></dl><p><code>3000:8080</code> means <strong>host port : container port</strong>. Changing it to <code>8088:8080</code> changes the browser address without changing Open WebUI's internal port.</p><pre><code>docker compose ps
+docker compose logs --tail=100 open-webui
+curl http://localhost:11434/api/tags
+docker exec -it open-webui sh</code></pre><aside class="callout"><strong>Test the shortest path first</strong><p>Host to Ollama. Container to Ollama. Browser to Open WebUI. Change one thing at a time.</p></aside></section>
+
+<section id="images-gpu"><h2>07. Image variants and GPU misunderstandings</h2><dl class="concept-list"><div><dt>:main</dt><dd>The normal release line. Convenient for a homelab when you choose when to pull updates.</dd></div><div><dt>:cuda</dt><dd>GPU support for components running inside the Open WebUI container. It is not required for a separate Ollama service to use its GPU.</dd></div><div><dt>Bundled Ollama</dt><dd>Maximum convenience in one image, with tighter lifecycles. This guide keeps services separate.</dd></div><div><dt>:dev</dt><dd>Pre-release code. Use a different container, port and volume; never share the production volume.</dd></div></dl><p>The model runtime owns inference. Giving a GPU to the interface container does not accelerate an external Ollama process.</p></section>
+
+<section id="first-boot"><h2>08. First boot and the administrator account</h2><p>The first account created becomes the administrator and is stored in the persistent volume. New-registration behaviour can later be controlled under <strong>Settings → Admin → Authentication</strong>.</p><p>Recreating a container while mounting the same volume does not reset the application. A true reset changes or removes the persistent data, which is a destructive operation.</p></section>
+
+<section id="logs"><h2>09. Logs and basic troubleshooting</h2><pre><code>docker compose logs -f open-webui
+docker compose logs --tail=100 open-webui
+docker compose ps
+docker inspect open-webui</code></pre><h3>Port already in use</h3><p>Change the host side of the mapping, such as <code>3001:8080</code>.</p><h3>The model list is empty</h3><p>The interface is running, so inspect provider configuration, the Ollama URL and whether port 11434 is reachable from the container.</p><h3>The browser looks broken after an update</h3><p>Perform a hard refresh to eliminate stale frontend assets before changing server configuration.</p></section>
+
+<section id="backups"><h2>10. Backups: protect state, not the image</h2><p>The container image can be downloaded again. Users, chats, settings, uploads and databases cannot. Inspect the volume and copy it consistently.</p><pre><code>docker volume inspect open-webui
+
+mkdir -p backups
+docker compose stop open-webui
+
+docker run --rm \
+  -v open-webui:/source:ro \
+  -v "$PWD/backups:/backup" \
+  alpine \
+  sh -c 'tar -czf /backup/open-webui-backup.tar.gz -C /source .'
+
+docker compose start open-webui</code></pre><aside class="callout warning"><strong>A backup is not proven until you restore it</strong><p>Confirm the archive exists, can be read and can restore a separate test instance. Keep another copy away from the machine being protected.</p></aside><p>Large Ollama models can often be downloaded again. Back up custom Modelfiles and any artefact you cannot reproduce.</p></section>
+
+<section id="updates"><h2>11. Updating safely</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/02-image-0.webp' alt='Safe Open WebUI update cycle: backup, review, pull, recreate and verify' caption='Updating replaces the container while preserving configuration and persistent state.' width='1536' height='1024' %}<pre><code>docker compose pull
+docker compose up -d
+docker compose logs --tail=100 open-webui</code></pre><p>For a personal homelab, a moving release tag is convenient. For a shared or critical instance, pin a version, read release notes and test before production.</p><pre><code>image: ghcr.io/open-webui/open-webui:v0.11.3</code></pre><aside class="callout warning"><strong>A rollback may require a data restore</strong><p>Database migrations can be one-way. Pointing the service at an older image does not reverse a schema change.</p></aside></section>
+
+<section id="https"><h2>12. HTTPS and reverse proxies</h2><p>HTTP can be acceptable on localhost or a controlled LAN. Outside that boundary, HTTPS protects credentials, chats and files in transit and enables browser APIs that require a secure context.</p><dl class="concept-list"><div><dt>WEBUI_URL</dt><dd>The real public URL of the instance.</dd></div><div><dt>CORS origins</dt><dd>Allow the exact browser origins that need access.</dd></div><div><dt>WebSockets</dt><dd>The proxy must preserve upgrade headers.</dd></div><div><dt>Streaming</dt><dd>Avoid proxy buffering that hides incremental responses.</dd></div><div><dt>Timeouts</dt><dd>Long inference may legitimately take minutes.</dd></div></dl><p>Opening port 3000 directly to the Internet is not a production design. TLS, authentication, CORS, firewall rules and controlled updates form one security surface.</p></section>
+
+<section id="standard"><h2>13. The deployment standard used in this guide</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/02-image-1.webp' alt='Original Chapter 02 cover showing Open WebUI installed with Docker' caption='The original Chapter 02 cover: a replaceable application with durable state.' width='1024' height='1536' %}<ul><li>Open WebUI runs through Docker Compose.</li><li><code>/app/backend/data</code> uses persistent, backed-up storage.</li><li><code>WEBUI_SECRET_KEY</code> remains stable.</li><li>Ollama runs as an independent service.</li><li>The Ollama connection uses an explicit URL.</li><li>Updates are controlled and preceded by a backup when migrations matter.</li></ul><p>This is small enough for a homelab and still teaches principles that survive PostgreSQL, Redis, reverse proxies, multiple users and several model servers.</p></section>
+
+<section id="checkpoint" class="checkpoint"><p class="eyebrow">PRACTICAL CHECKPOINT</p><h2>Can you recover the installation?</h2><ul><li>What is the difference between deleting a container and deleting its volume?</li><li>Why must <code>/app/backend/data</code> persist?</li><li>What does <code>3000:8080</code> mean?</li><li>Why is container <code>localhost</code> not the Linux host?</li><li>Does Open WebUI need its CUDA image for an external Ollama to use the GPU?</li><li>Why can a rollback need a backup, not only an older image?</li></ul></section>
+
+<section id="glossary"><h2>14. Essential vocabulary</h2><dl class="concept-list"><div><dt>Container</dt><dd>A running, replaceable instance of an image.</dd></div><div><dt>Image</dt><dd>The immutable template used to create containers.</dd></div><div><dt>Volume</dt><dd>Persistent storage managed by Docker.</dd></div><div><dt>Bind mount</dt><dd>A specific host directory mounted into a container.</dd></div><div><dt>Port mapping</dt><dd>The relationship between a host port and a container port.</dd></div><div><dt>Secret key</dt><dd>A stable application secret that must survive recreation.</dd></div><div><dt>Reverse proxy</dt><dd>A front service that routes traffic and commonly adds HTTPS.</dd></div><div><dt>Pinned version</dt><dd>A fixed image tag that makes deployment reproducible.</dd></div></dl></section>
+
+{% endblock %}
+{% block official_sources %}<a href="https://docs.openwebui.com/getting-started/quick-start/" target="_blank" rel="noopener">Open WebUI Quick Start ↗</a><a href="https://docs.openwebui.com/getting-started/updating/" target="_blank" rel="noopener">Updating Open WebUI ↗</a>{% endblock %}
+

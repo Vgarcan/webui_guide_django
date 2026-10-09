@@ -1,0 +1,22 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06111e">
+  <title>{% block title %}Open WebUI — A Field Guide{% endblock %}</title>
+  <meta name="description" content="{% block description %}An independent field guide to understanding, installing and configuring Open WebUI and local AI.{% endblock %}">
+  <link rel="icon" href="{% static 'imgs/favicon.svg' %}" type="image/svg+xml">
+  {% for sheet in stylesheets %}<link rel="stylesheet" href="{% static sheet.path %}?v={{ sheet.version }}">
+  {% endfor %}
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  {% include 'partials/header.html' %}
+  <main id="main-content">{% block content %}{% endblock %}</main>
+  {% include 'partials/footer.html' %}
+  {% include 'partials/search.html' %}
+  <script type="module" src="{% static 'js/main.js' %}?v={{ script_version }}"></script>
+</body>
+</html>

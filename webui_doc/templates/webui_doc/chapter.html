@@ -1,0 +1,32 @@
+{% extends 'webui_doc/chapter_base.html' %}
+{% block chapter_content %}
+  <section class="chapter-orientation" aria-labelledby="orientation-title">
+    <p class="eyebrow">IN THIS CHAPTER</p>
+    <h2 id="orientation-title">{{ chapter.subtitle }}</h2>
+    <p>{{ chapter.intro }}</p>
+  </section>
+
+  {% for module in chapter.modules %}
+    <section id="{{ module.id }}" class="chapter-module">
+      <div class="module-marker"><span>{{ forloop.counter|stringformat:"02d" }}</span><i aria-hidden="true"></i></div>
+      <div>
+        <p class="eyebrow">{{ module.signal|upper }}</p>
+        <h2>{{ module.title }}</h2>
+        <p>{{ module.copy }}</p>
+      </div>
+    </section>
+  {% endfor %}
+
+  <section class="checkpoint" id="checkpoint">
+    <p class="eyebrow">CHECKPOINT</p>
+    <h2>Before you continue</h2>
+    <p>You are ready for the next chapter when you can do these without relying on a menu location or a memorised command.</p>
+    <ul>{% for outcome in chapter.outcomes %}<li>{{ outcome }}</li>{% endfor %}</ul>
+  </section>
+
+  <section class="practice-card" aria-labelledby="practice-title">
+    <p class="eyebrow">PRACTICE / 20 MINUTES</p>
+    <h2 id="practice-title">{{ chapter.practice.0 }}</h2>
+    <p>{{ chapter.practice.1 }}</p>
+  </section>
+{% endblock %}

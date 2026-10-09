@@ -1,0 +1,86 @@
+{% extends 'webui_doc/chapter_base.html' %}
+{% block chapter_content %}
+
+<section class="chapter-orientation"><p class="eyebrow">COOKBOOK</p><h2>Build the smallest version, then earn the next layer</h2><p>These recipes turn the guide into outcomes. Each follows the same discipline: define a goal, select only necessary ingredients, build a baseline, test one reproducible task, verify evidence and improve one dimension at a time.</p></section>
+
+<section id="method"><h2>00. How to use the cookbook</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-3.webp' alt='Recipe loop from goal through build test verify and improve' caption='Figure 1 · Use the same build-test-verify loop even when the use case changes.' width='1600' height='900' %}<ol><li><strong>Goal:</strong> name the concrete outcome.</li><li><strong>Ingredients:</strong> choose only the components required.</li><li><strong>Build:</strong> configure the minimum working version.</li><li><strong>Test:</strong> run a small reproducible task.</li><li><strong>Verify:</strong> inspect output, logs, permissions and effects.</li><li><strong>Improve:</strong> add context, Tools, Memory or automation after the baseline.</li></ol>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-1.webp' alt='Recipe selector organised by desired outcome' caption='Figure 2 · Start from the outcome, then jump to the smallest relevant recipe.' width='1600' height='900' %}<blockquote>If a recipe fails, return to the last working step. Do not add another feature to repair a broken feature.</blockquote></section>
+
+<section id="daily"><h2>01. Build a Daily Assistant</h2><h3>Goal and ingredients</h3><p>Create a baseline for conversation, writing and technical explanation using one reliable base model, one Workspace Model preset, a short system prompt and optionally Memory. Do not attach Knowledge or Tools yet.</p><pre><code>You are a practical daily assistant.
+Explain technical topics clearly and step by step when needed.
+Do not invent facts when information is missing.
+Prefer concise answers first, then expand when asked.
+The current date is &#123;&#123; CURRENT_DATE &#125;&#125;.</code></pre>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-6.webp' alt='Open WebUI Workspace Models screen used to create a Daily Assistant' caption='Interface · A preset gives a raw model a stable name, prompt and capability profile.' width='2048' height='1365' %}<h3>Test and verify</h3><p>Ask it to explain RAM versus VRAM for a beginner, then rewrite a short professional email. Verify tone, usefulness, reasonable first-token latency and completion without hidden Tool dependencies. Add suggestions, a style Skill, Memory or search only when the baseline shows a real need.</p><p>If it fails, test the raw base model, then the preset with its system prompt, then optional capabilities. This reveals whether the problem is inference, configuration or an added layer.</p></section>
+
+<section id="rag"><h2>02. Build a Document Analyst with RAG</h2><h3>Build</h3><ol><li>Create a <strong>Project Documents</strong> Knowledge collection.</li><li>Upload one or two documents, not five hundred.</li><li>Inspect extracted text; scanned PDFs may require OCR.</li><li>Create <strong>Document Analyst</strong> and attach the collection.</li><li>Use Focused Retrieval first; use Full Context only when the entire source reasonably fits.</li></ol><pre><code>Answer using the attached knowledge when relevant.
+If the documents do not support a claim, say that evidence
+is not available. Name the source document when possible.</code></pre>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-9.webp' alt='Open WebUI Knowledge Base with files for a Document Analyst' caption='Interface · Verify the collection and its files before judging the assistant.' width='2048' height='1365' %}<h3>Test and verify</h3><p>Ask one question whose answer appears literally in the source and one deliberately unsupported question. The first should retrieve the correct passage; the second should acknowledge missing evidence. Diagnose failures in order: extraction → chunks → embeddings → retrieval → context → answer.</p></section>
+
+<section id="ba"><h2>03. Build a Business Analyst Assistant</h2><p>Combine components by responsibility:</p><div class="table-scroll"><table><thead><tr><th>Component</th><th>Responsibility</th></tr></thead><tbody><tr><td>Knowledge</td><td>Approved PDDs, maps, templates and project facts.</td></tr><tr><td>Skill</td><td>Method: distinguish current/future state, expose assumptions, find rules and exceptions.</td></tr><tr><td>Prompt</td><td>The immediate command, such as <code>/review-pdd</code>.</td></tr><tr><td>Tool</td><td>Read-only live lookup for ticket owner, status or deadline.</td></tr></tbody></table></div><p>Separate collections by project and label drafts versus approved sources. A Skill teaches how to work; it should not masquerade as project evidence.</p><pre><code>Review the selected PDD using the BA Review Skill.
+Return: gaps, contradictions, missing inputs and outputs,
+unclear rules, exceptions and follow-up questions.</code></pre><p>Verify that facts come from Knowledge, methodology from the Skill and live status only from the Tool.</p><p>For professional work, require it to separate verified facts, inferred interpretation, missing information and questions. The output should preserve source terminology unless the user explicitly requests a rewrite.</p></section>
+
+<section id="coding"><h2>04. Build a Coding Agent with Computer and Git</h2><p>Open a repository as a Computer workspace. Confirm it starts and its relevant checks pass, then ask the agent to inspect instructions and structure before editing. Use Plan Mode for unfamiliar or high-impact work, a branch for implementation and separate worktrees for parallel tasks.</p>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-7.webp' alt='Open WebUI Computer workspace with files terminal Git and coding agent' caption='Interface · The repository, terminal, Git state and conversation share one workspace.' width='2048' height='1176' %}<pre><code>Reproduce this bug, add a failing regression test,
+implement the smallest fix, run the focused tests,
+then show me the diff.</code></pre><p>Verify that reproduction evidence exists, the test fails before the fix and passes after, the diff is focused and no user change was overwritten. Unattended scheduled or gateway tasks may not pause for interactive approval; isolate them accordingly.</p></section>
+
+<section id="openapi"><h2>05. Connect your REST API with OpenAPI</h2><p>Expose explicit operations rather than arbitrary database or shell access. Start with a tiny read-only FastAPI service:</p><pre><code>from fastapi import FastAPI
+from pydantic import BaseModel, Field
+
+app = FastAPI(title="Support Tools", version="1.0.0")
+
+class SearchRequest(BaseModel):
+    query: str = Field(description="Text to search in tickets")
+
+@app.get("/health", operation_id="health_check")
+def health_check():
+    return {"status": "ok"}
+
+@app.post("/tickets/search", operation_id="search_tickets")
+def search_tickets(body: SearchRequest):
+    return {"query": body.query, "tickets": []}</code></pre><p>Test the generated <code>/docs</code> directly, add the service under External Tool Servers, restrict access and enable only this Tool in a new chat.</p>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-8.webp' alt='Open WebUI External Tool Server configuration' caption='Interface · An OpenAPI server exposes a narrow documented contract to the model.' width='911' height='597' %}<p>Ask for health, then a ticket search. Verify operation selection, valid arguments, structured JSON and correct use of the result. Add write operations only after authentication, timeouts and observability are proven. Security lives in the API server, not in a system-prompt sentence.</p><p>Before a write operation, add request validation, a narrow service credential, idempotency and an audit record. Use human confirmation when the outcome is difficult to reverse.</p></section>
+
+<section id="mcp"><h2>06. Connect a SaaS service with MCP</h2><ol><li>Trust the server’s source and deployment.</li><li>Add an External Tool Server using MCP Streamable HTTP.</li><li>Configure server URL and authentication.</li><li>Complete OAuth from the canonical Open WebUI URL where required.</li><li>Keep <code>WEBUI_SECRET_KEY</code> stable.</li><li>Limit access to the group that needs the connector.</li><li>Run a read-only discovery request first.</li></ol><pre><code>List the resources available through the connected service.
+Do not modify anything.</code></pre><p>A healthy connection proves transport and authentication, not that the model will choose the right capability. Evaluate Tool descriptions, arguments and model behaviour separately.</p><p>If discovery works but execution fails, inspect the selected operation, user-scoped OAuth state and exact server response. If direct execution works but the model does not call it, improve Tool naming and description or choose a more reliable tool-calling model.</p></section>
+
+<section id="briefing"><h2>07. Create a Daily Automated Briefing</h2><p>First make a normal chat succeed with a stable preset and read-only data. Then create an Automation using the same model and an optional Folder for generated run chats.</p><pre><code>Create today's project briefing.
+Include meaningful changes since the previous working day,
+open blockers, deadlines needing attention and follow-up actions.
+If there is no meaningful change, say so clearly.
+
+RRULE:FREQ=DAILY;BYHOUR=8;BYMINUTE=0</code></pre><p>Use <strong>Run Now</strong>. Verify a real chat is created, the run status succeeds, expected Knowledge and Tools remain available and history contains enough evidence to inspect the result.</p><p>Add selective delivery only after the briefing is stable: notify on new blockers or changed deadlines, not every routine success. Keep the generated chat as operational evidence.</p></section>
+
+<section id="django"><h2>08. Build a Django app on Open WebUI</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-4.webp' alt='Layered capability path from custom UI and Django through Open WebUI to RAG tools agents and automation' caption='Figure 3 · A custom product can begin with chat and add platform capability in controlled layers.' width='1600' height='900' %}<pre><code>browser → Django → Open WebUI API
+        → Model / Knowledge / Tools</code></pre><pre><code>@require_POST
+def ask_ai(request):
+    """Keep the upstream credential inside the trusted backend."""
+    prompt = request.POST.get("prompt", "").strip()
+    if not prompt:
+        return JsonResponse({"error": "Prompt is required"}, status=400)
+
+    response = requests.post(
+        f"{settings.OPEN_WEBUI_URL}/api/chat/completions",
+        headers={"Authorization":
+                 f"Bearer {settings.OPEN_WEBUI_API_KEY}"},
+        json={"model": "daily-assistant",
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=60,
+    )
+    response.raise_for_status()
+    return JsonResponse(response.json())</code></pre><p>The browser sends the prompt to Django and never receives the upstream key. Verify Django authentication and permission checks, safe error mapping and a successful answer from the preset. Add SSE, conversation state, rate limiting, collection IDs or server-side Tools only after the basic route works.</p><p>Keep ownership explicit: Django stores product-specific records; Open WebUI resolves AI capabilities; the provider performs inference. Avoid persisting the same conversation in both places unless one is the defined source of truth.</p></section>
+
+<section id="memory"><h2>09. Add Memory and personalisation</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-5.webp' alt='Open WebUI Model Editor capabilities including Memory' caption='Interface · Memory is a scoped capability of a preset and user, not a document database.' width='2048' height='1502' %}<div class="table-scroll"><table><thead><tr><th>Good memory</th><th>Wrong place</th></tr></thead><tbody><tr><td>Preferred language or answer structure</td><td>Whole project document — use Knowledge.</td></tr><tr><td>Durable personal preference</td><td>Temporary task state — keep it in the task/chat.</td></tr><tr><td>Stable fact useful across chats</td><td>Password, key or secret — never conversational Memory.</td></tr></tbody></table></div><p>Enable the feature and user permission, then expose the Memory built-in category only to a model with reliable native tool calling.</p><pre><code>Remember that I prefer a short explanation first,
+then a detailed step-by-step section.</code></pre><p>Start a new chat and ask how tutorials should be structured. Verify the memory is visible under Personalisation, belongs to that user and is retrieved appropriately.</p></section>
+
+<section id="recovery"><h2>10. Backup, health check and recovery drill</h2><h3>Daily quick check</h3><pre><code>curl -fsS http://localhost:3000/health
+curl -fsS http://localhost:11434/api/tags
+ollama ps</code></pre><p>Also test the HTTPS URL people actually use.</p><h3>Safe SQLite backup shape</h3><pre><code>docker stop open-webui
+docker cp open-webui:/app/backend/data ./open-webui-data-backup
+# Store WEBUI_SECRET_KEY separately in protected secret backup.
+docker start open-webui</code></pre><p>External PostgreSQL, object storage or vector services need their own dump or snapshot. For the drill, restore into an isolated instance with the same application secret, verify login, chats, Knowledge and connections, then perform a real completion. Record every step the written procedure missed.</p><blockquote>A backup that has never been restored is hope, not a recovery strategy.</blockquote></section>
+
+<section id="cheatsheet"><h2>11. Final component map</h2>{% include 'webui_doc/partials/figure.html' with image='imgs/18-image-2.webp' alt='Open WebUI component map for model knowledge prompt skill memory tool agent and automation' caption='Figure 4 · Choose the smallest building block that matches the missing capability.' width='1600' height='900' %}<div class="table-scroll"><table><thead><tr><th>I need…</th><th>Choose…</th></tr></thead><tbody><tr><td>A reusable assistant</td><td>Workspace Model</td></tr><tr><td>Facts from documents</td><td>Knowledge</td></tr><tr><td>A repeated instruction</td><td>Prompt</td></tr><tr><td>A reusable method</td><td>Skill</td></tr><tr><td>A live action or lookup</td><td>Tool</td></tr><tr><td>An external service</td><td>OpenAPI or MCP</td></tr><tr><td>User facts across chats</td><td>Memory</td></tr><tr><td>Work later or on a schedule</td><td>Automation</td></tr><tr><td>Repository, files and terminal</td><td>Computer</td></tr><tr><td>My own product interface</td><td>Open WebUI API</td></tr></tbody></table></div></section>
+
+<section id="layers"><h2>12. The final rule: grow capability in layers</h2><pre><code>Chat → Preset → RAG → Tools → Agent → Automation</code></pre><p>The most useful platform is not the one with the most components. It is the one that solves real workflows with the fewest necessary layers. Every added layer brings permission, state, cost, latency and failure modes.</p><p>At the end of each recipe, record its owner, configuration, success test, known limitation and rollback. That small operational note is what turns an experiment into a reusable platform component.</p><blockquote>Build it. Test it. Verify it. Document it. Then reuse it.</blockquote></section>
+
+{% endblock %}
+{% block official_sources %}<a href="https://docs.openwebui.com/features/workspace/" target="_blank" rel="noopener">Workspace ↗</a><a href="https://docs.openwebui.com/features/workspace/knowledge/" target="_blank" rel="noopener">Knowledge ↗</a><a href="https://docs.openwebui.com/features/extensibility/plugin/tools/openapi-servers/" target="_blank" rel="noopener">OpenAPI tools ↗</a><a href="https://docs.openwebui.com/features/extensibility/mcp/" target="_blank" rel="noopener">MCP ↗</a><a href="https://docs.openwebui.com/features/chat-conversations/chat-features/automations/" target="_blank" rel="noopener">Automations ↗</a><a href="https://docs.openwebui.com/reference/api-endpoints/" target="_blank" rel="noopener">API endpoints ↗</a>{% endblock %}
